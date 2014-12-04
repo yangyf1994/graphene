@@ -80,10 +80,10 @@ public class GraphBuffer {
         hasAlphaChannel = image.getAlphaRaster() != null;
         g = image.createGraphics();
         
-        xPlotCoordStart=0; 
-        xPlotCoordEnd=width;
-        yPlotCoordStart=height; 
-        yPlotCoordEnd=0; 
+        //xPlotCoordStart=0; 
+        //xPlotCoordEnd=width;
+        //yPlotCoordStart=height; 
+        //yPlotCoordEnd=0; 
     }
     
     /**
@@ -566,19 +566,8 @@ public class GraphBuffer {
         private int start;
         private int end;
     }
-    void drawLineGraph(Point2DDataset data, InterpolationScheme interpolation,ReductionScheme reduction){
-        
-        calculateGraphArea(data);
-        SortedListView xValues = org.epics.util.array.ListNumbers.sortedView(data.getXValues());
-        ListNumber yValues = org.epics.util.array.ListNumbers.sortedView(data.getYValues(), xValues.getIndexes());
-        
-        //g.setClip(0, 0, 300, 200);
-        g.setColor(Color.BLACK);
-        drawValueExplicitLine(xValues, yValues, interpolation, reduction);
-    
-    }
-    
-    protected void drawValueLine(ListNumber xValues, ListNumber yValues, InterpolationScheme interpolation) {
+
+    public void drawValueLine(ListNumber xValues, ListNumber yValues, InterpolationScheme interpolation,ProcessValue pv) {
         ReductionScheme reductionScheme = ReductionScheme.NONE;
         
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
@@ -590,7 +579,7 @@ public class GraphBuffer {
             default:
                 throw new IllegalArgumentException("Reduction scheme " + reductionScheme + " not supported");
             case NONE:
-                scaledData = scaleNoReduction(xValues, yValues);
+                scaledData = scaleNoReduction(xValues, yValues,pv);
                 break;
         }
         
@@ -613,28 +602,30 @@ public class GraphBuffer {
         g.draw(path);
     }
     
-    final ProcessValue pv= new valueProcess(); 
-    private void drawValueExplicitLine(ListNumber xValues, ListNumber yValues, InterpolationScheme interpolation, ReductionScheme reduction) {
-        
-        
+    public void drawValueExplicitLine(Point2DDataset data, InterpolationScheme interpolation, ReductionScheme reduction,ProcessValue pv){
+ 
+        SortedListView xValues = org.epics.util.array.ListNumbers.sortedView(data.getXValues());
+        ListNumber yValues = org.epics.util.array.ListNumbers.sortedView(data.getYValues(), xValues.getIndexes());
+        this.drawValueExplicitLine(xValues, yValues, interpolation, reduction, pv);
+    }
+    private void drawValueExplicitLine(ListNumber xValues,ListNumber yValues, InterpolationScheme interpolation, ReductionScheme reduction,ProcessValue pv) {
+       
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
         g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
         
         ScaledData scaledData;
-        
-     
-        //Narrow Data
+             
         int start = org.epics.util.array.ListNumbers.binarySearchValueOrLower(xValues, xPlotValueStart);
         int end = org.epics.util.array.ListNumbers.binarySearchValueOrHigher(xValues, xPlotValueEnd);
         
-        xValues = ListMath.limit(xValues, start, end + 1);
+        xValues =ListMath.limit(xValues, start, end + 1);
         yValues = ListMath.limit(yValues, start, end + 1);
         
         switch (reduction) {
             default:
                 throw new IllegalArgumentException("Reduction scheme " + reduction + " not supported");
             case NONE:
-                scaledData = scaleNoReduction(xValues, yValues, start);
+                scaledData = scaleNoReduction(xValues, yValues, start,pv);
                 break;
             case FIRST_MAX_MIN_LAST:
                 scaledData = scaleFirstMaxMinLastReduction(xValues, yValues, start,pv);
@@ -659,14 +650,17 @@ public class GraphBuffer {
         // Draw the line
         g.draw(path);
     }
-    private void calculateGraphArea(Point2DDataset data){
-        
-        Range xPlotRange=xAxisRange.axisRange(data.getXStatistics(), data.getXDisplayRange()); 
-        Range yPlotRange=yAxisRange.axisRange(data.getYStatistics(), data.getYDisplayRange()); 
+    public void preparePlot(Range xPlotRange, Range yPlotRange,double xPlotCoordStart,double xPlotCoordEnd, double yPlotCoordStart, double yPlotCoordEnd){
+       
         xPlotValueStart = xPlotRange.getMinimum().doubleValue();
         xPlotValueEnd = xPlotRange.getMaximum().doubleValue();
         yPlotValueStart = yPlotRange.getMinimum().doubleValue();
         yPlotValueEnd = yPlotRange.getMaximum().doubleValue();
+        
+        this.xPlotCoordStart=xPlotCoordStart; 
+        this.xPlotCoordEnd=xPlotCoordEnd; 
+        this.yPlotCoordStart=yPlotCoordStart; 
+        this.yPlotCoordEnd=yPlotCoordEnd;
     }
     
     private double scaledX(double value) {
@@ -676,11 +670,11 @@ public class GraphBuffer {
     private double scaledY(double value) {
         return yValueScale.scaleValue(value, yPlotValueStart, yPlotValueEnd,yPlotCoordStart, yPlotCoordEnd);
     }
-    private ScaledData scaleNoReduction(ListNumber xValues, ListNumber yValues) {
-        return scaleNoReduction(xValues, yValues, 0);
+    private ScaledData scaleNoReduction(ListNumber xValues, ListNumber yValues,ProcessValue pv) {
+        return scaleNoReduction(xValues, yValues, 0,pv);
     }
 
-    private ScaledData scaleNoReduction(ListNumber xValues, ListNumber yValues, int dataStart) {
+    private ScaledData scaleNoReduction(ListNumber xValues, ListNumber yValues, int dataStart,ProcessValue pv) {
         ScaledData scaledData = new ScaledData();
         int dataCount = xValues.size();
         scaledData.scaledX = new double[dataCount];
@@ -688,7 +682,7 @@ public class GraphBuffer {
         for (int i = 0; i < scaledData.scaledY.length; i++) {
             scaledData.scaledX[i] = scaledX(xValues.getDouble(i));
             scaledData.scaledY[i] = scaledY(yValues.getDouble(i));
-            //processScaledValue(dataStart + i, xValues.getDouble(i), yValues.getDouble(i), scaledData.scaledX[i], scaledData.scaledY[i]);
+            pv.processScaledValue(dataStart + i, xValues.getDouble(i), yValues.getDouble(i), scaledData.scaledX[i], scaledData.scaledY[i]);
         }
         scaledData.end = dataCount;
         return scaledData;
@@ -700,7 +694,7 @@ public class GraphBuffer {
         // than that, it's not worth it. Don't do the data reduction.
         int xPlotCoordWidth=300; 
         if (xValues.size() < xPlotCoordWidth * 4) {
-            return scaleNoReduction(xValues, yValues, dataStart);
+            return scaleNoReduction(xValues, yValues, dataStart,pv);
         }
 
         ScaledData scaledData = new ScaledData();
@@ -752,23 +746,6 @@ public class GraphBuffer {
         return scaledData;
     }
     
-    //process value 
-    private class valueProcess implements ProcessValue{
-        
-            private int currentIndex;
-            private double currentScaledDiff;
-            
-            public void valueProcess (){}
-       
-            @Override
-       public void processScaledValue(int index, double valueX, double valueY, double scaledX, double scaledY){
-           double scaledDiff = Math.abs(scaledX - focusPixelX);
-            if (scaledDiff < currentScaledDiff) {
-                currentIndex = index;
-                currentScaledDiff = scaledDiff;
-            }
-       }
-    };
     
     private static Path2D.Double nearestNeighbour(ScaledData scaledData) {
         double[] scaledX = scaledData.scaledX;

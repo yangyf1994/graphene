@@ -501,6 +501,13 @@ public class TimeScales {
         return result;
     }
     
+    /**
+     * Trims a list of time axis labels to remove unnecessary redundancy.
+     * 
+     * @param labels a list of dates that will be displayed on a time axis
+     * @return a list of modified dates without redundancy that can be displayed
+     * on a time axis
+     */
     static List<String> trimLabels( List< String > labels ) {
 	
 	//special case: if there are 1 or fewer labels, we cannot do redundance
@@ -516,17 +523,17 @@ public class TimeScales {
 	int greatestChangingPrecision = calculateGreatestChangingField( labels );
 	
 	ArrayList< String > rtn = new ArrayList< String >( labels.size() );
-	DateFormatter firstDate = new DateFormatter( labels.get( 0 ) );
+	DateTrimmer firstDate = new DateTrimmer( labels.get( 0 ) );
 	
 	//the first date will need to display all information, even if it is
 	//redundant; however, we can drop some trailing 0s, up to the
 	//precision that is changing
-	rtn.add( firstDate.getCompactForm( -1 , greatestChangingPrecision ) );
+	rtn.add( firstDate.getCompactForm( DateTrimmer.NO_PRECISION , greatestChangingPrecision ) );
 	for ( int i=1 ; i<labels.size() ; i++ ) {
 	    String prevLabel = labels.get( i-1 );
 	    String nextLabel = labels.get( i );
 	    int redundancePrecision = greatestRedundancePrecision( prevLabel , nextLabel );
-	    DateFormatter f = new DateFormatter( nextLabel );
+	    DateTrimmer f = new DateTrimmer( nextLabel );
 	    String trimmedLabel = f.getCompactForm( redundancePrecision , greatestChangingPrecision );
 	    rtn.add( trimmedLabel );
 	}
@@ -534,7 +541,7 @@ public class TimeScales {
     }
     
     /**
-     * Calculates the greatest precision at which both the last label
+     * Calculates the place of greatest precision at which both the last label
      * and the current label are the same
      * 
      * @param lastLabel
@@ -542,8 +549,8 @@ public class TimeScales {
      * @return 
      */
     private static int greatestRedundancePrecision( String lastLabel , String currLabel ) {
-	int[] lastLabelFields = DateFormatter.parseFields( lastLabel );
-	int[] currLabelFields = DateFormatter.parseFields( currLabel );
+	int[] lastLabelFields = DateTrimmer.parseFields( lastLabel );
+	int[] currLabelFields = DateTrimmer.parseFields( currLabel );
 	for ( int i=0 ; i<lastLabelFields.length ; i++ ) {
 	    if ( lastLabelFields[ i ] != currLabelFields[ i ] ) {
 		return i-1;
@@ -554,7 +561,8 @@ public class TimeScales {
     
     /**
      * Calculates the greatest precision at which the last label and the
-     * current label are changing. The list of labels must be non-empty.
+     * current label are changing. The list of labels must be non-empty. 
+     * If the list of labels is empty, then maximum precision is returned.
      * 
      * @param labels
      * @return 
@@ -562,7 +570,7 @@ public class TimeScales {
     private static int calculateGreatestChangingField( List< String > labels ) {
 	int[][] fields = new int[ labels.size() ][];
 	for ( int i=0 ; i<labels.size() ; i++ ) {
-	    fields[ i ] = DateFormatter.parseFields( labels.get( i ) );
+	    fields[ i ] = DateTrimmer.parseFields( labels.get( i ) );
 	}
 	int rtn = -1;
 	for ( int fieldId=fields[ 0 ].length-1 ; fieldId >= 0 ; fieldId-- ) {
@@ -578,75 +586,152 @@ public class TimeScales {
 	    }
 	}
 	if ( rtn == -1 ) {
-	    return DateFormatter.NANOSECOND_PRECISION;
+	    return DateTrimmer.NANOSECOND_PRECISIONS[9];
 	}
-	//there is no milliseconds field, so if we got a fieldId of 6, corresponding
-	//to milliseconds, it is actually nanoseconds that are changing
-	if ( rtn == DateFormatter.MILLISECOND_PRECISION ) {
+	
+	//determine the latest decimal place at which the nanoseconds are nonzero
+	//because we will need to maintain precision to that decimal place
+	//for all labels
+	if ( rtn == DateTrimmer.NANOSECOND_PRECISION ) {
 	    
-	    //if the amount by which nanoseconds are changing corresponds to
-	    //changes in milliseconds, then identify the changing field as ms
-	    for ( int i=0 ; i<labels.size() ; i++ ) {
-		if ( (fields[ i ][ DateFormatter.MILLISECOND_PRECISION ] % 1000000) != 0 ) {
-		    return DateFormatter.NANOSECOND_PRECISION;
+	    int modulus = 10;
+	    for ( int decimalPlace = 9; decimalPlace >= 1 ; decimalPlace-- ) {
+		boolean isDecimalPlaceZero = true;
+		for ( int i=0 ; i<labels.size() ; i++ ) {
+		    if ( fields[ i ][ DateTrimmer.NANOSECOND_PRECISION ] % modulus != 0 ) {
+			isDecimalPlaceZero = false;
+		    }
 		}
+		if ( !isDecimalPlaceZero ) {
+		    return DateTrimmer.NANOSECOND_PRECISIONS[ decimalPlace ];
+		}
+		modulus *= 10;
 	    }
-	    return DateFormatter.MILLISECOND_PRECISION;
+	    return DateTrimmer.NANOSECOND_PRECISIONS[0];
 	}
 	return rtn;
     }
     
-    static class DateFormatter {
+    /**
+     * Trims a date given specific redundancy and precision bounds. 
+     * 
+     * <p>
+     * 
+     * For example, suppose we have the dates 
+     * <ul>
+     * <li> "2014/11/26 09:01:00.000000000" 
+     * <li> "2014/11/26 09:02:00.020000000"
+     * <li> "2014/11/26 09:03:00.040000000"
+     * <li> "2014/11/26 09:04:00.060000000"
+     * <li> "2014/11/26 09:05:00.080000000" 
+     * </ul>
+     * and we want to use them as labels on a time axis. It would be 
+     * redundant to display "2014/11/26" on every label. Thus, "2014/11/26" 
+     * is redundant and needs to be removed. Similarly, the trailing 0s are
+     * redundant and we only need to maintain 2 decimal places of nanosecond
+     * precision. <code>DateTrimmer</code> allows us to arbitrarily decide
+     * if we want to display years, months, days, etc., and then builds the
+     * date label.
+     * 
+     * <p>
+     * 
+     * Precisions are given as follows:
+     * <ul>
+     * <li> -1 = NO PRECISION
+     * <li> 0 = YEAR
+     * <li> 1 = MONTH
+     * <li> 2 = DAY
+     * <li> 3 = HOUR
+     * <li> 4 = MINUTE
+     * <li> 5 = SECOND
+     * <li> 6 = NANOSECOND, 1 digit of precision
+     * <li> 7 = NANOSECOND, 2 digits of precision
+     * <li> 8 = NANOSECOND, 3 digits of precision
+     * <li> 9 = NANOSECOND, 4 digits of precision
+     * <li> 10 = NANOSECOND, 5 digits of precision
+     * <li> 11 = NANOSECOND, 6 digits of precision
+     * <li> 12 = NANOSECOND, 7 digits of precision
+     * <li> 13 = NANOSECOND, 8 digits of precision
+     * <li> 14 = NANOSECOND, 9 digits of precision
+     * <li> 1000 = INFINITE PRECISION
+     * </ul>
+     * This ordering can be used for comparison. For example, years are less 
+     * precise than months, so they have a smaller precision value. 
+     * 
+     * <p>
+     * 
+     * When removing redundant parts from the front of a date, all precision 
+     * from YEARS up to the given common precision will be removed. When 
+     * removing redundant parts from the end of a date, only a required
+     * precision will be requested. The required precision is the most precise
+     * precision that the date must maintain. Everything more precise than the 
+     * required precision will be removed.
+     * 
+     * <p>
+     * 
+     * The <code>DateTrimmer</code> works by allowing redundancy checks to
+     * turn off years, months, days, etc. from the display. Any special cases
+     * can then be handled afterwards, as years, months, days, ... can be
+     * turned on again.
+     * 
+     * @author mjchao
+     */
+    static class DateTrimmer {
 	
+	final public static int NO_PRECISION = -1;
 	final public static int YEAR_PRECISION = 0;
 	final public static int MONTH_PRECISION = 1;
 	final public static int DAY_PRECISION = 2;
 	final public static int HOUR_PRECISION = 3;
 	final public static int MINUTE_PRECISION = 4;
 	final public static int SECOND_PRECISION = 5;
-	final public static int MILLISECOND_PRECISION = 6;
-	final public static int NANOSECOND_PRECISION = 7;
+	final public static int NANOSECOND_PRECISION = 6;
+	final public static int[] NANOSECOND_PRECISIONS = { 5 , 6 , 7 , 8 , 9 , 10 , 11 , 12 , 13 , 14 };
+	final public static int INFINITE_PRECISION = 1000;
 	
 	private int m_year;
-	private boolean m_showYears = true;
+	private boolean m_showYear = true;
 	private int m_month;
-	private boolean m_showMonths = true;
+	private boolean m_showMonth = true;
 	private int m_day;
-	private boolean m_showDays = true;
+	private boolean m_showDay = true;
 	private int m_hour;
-	private boolean m_showHours = true;
+	private boolean m_showHour = true;
 	private int m_minute;
-	private boolean m_showMinutes = true;
+	private boolean m_showMinute = true;
 	private int m_second;
-	private boolean m_showSeconds = true;
-	private int m_millisecond;
-	private boolean m_showMilliseconds = true;
+	private boolean m_showSecond = true;
 	private int m_nanosecond;
-	private boolean m_showNanoseconds = true;
+	private int m_nanosecondDecimalPlace = 9;
+	private boolean m_showNanosecond = true;
 	
-	public DateFormatter( int year , int month , int day , int hour , int minute , int second , int nanosecond ) {
+	/**
+	 * Creates a <code>DateTrimmer</code> with the given date fields
+	 * 
+	 * @param year
+	 * @param month
+	 * @param day
+	 * @param hour
+	 * @param minute
+	 * @param second
+	 * @param nanosecond 
+	 */
+	public DateTrimmer( int year , int month , int day , int hour , int minute , int second , int nanosecond ) {
 	    this.m_year = year;
 	    this.m_month = month;
 	    this.m_day = day;
 	    this.m_hour = hour;
 	    this.m_minute = minute;
 	    this.m_second = second;
-	    this.m_millisecond = nanosecond / 1000000;
-	    this.m_nanosecond = nanosecond % 1000000;
-	}
-	
-	public DateFormatter( int year , int month , int day , int hour , int minute , int second , int millisecond , int nanosecond ) {
-	    this.m_year = year;
-	    this.m_month = month;
-	    this.m_day = day;
-	    this.m_hour = hour;
-	    this.m_minute = minute;
-	    this.m_second = second;
-	    this.m_millisecond = millisecond;
 	    this.m_nanosecond = nanosecond;
 	}
 	
-	public DateFormatter( String date ) {
+	/**
+	 * Creates a <code>DateTrimmer</code> for the given date
+	 * 
+	 * @param date 
+	 */
+	public DateTrimmer( String date ) {
 	    int[] fields = parseFields( date );
 	    this.m_year = fields[ 0 ];
 	    this.m_month = fields[ 1 ];
@@ -654,12 +739,22 @@ public class TimeScales {
 	    this.m_hour = fields[ 3 ];
 	    this.m_minute = fields[ 4 ];
 	    this.m_second = fields[ 5 ];
-	    this.m_millisecond = fields[ 6 ] / 1000000;
-	    this.m_nanosecond = fields[ 6 ] % 1000000;
+	    this.m_nanosecond = fields[ 6 ];
 	}
 	
-	protected static int[] parseFields( String time ) {
-	    String[] fields = time.split( "/|:| |\\." );
+	/**
+	 * Parses the years, months, days, etc. from a complete date string.
+	 * If the date string is not of the form YYYY/MM/DD HH/MM/SS.NNNNNNNNN
+	 * (N=Nanoseconds) then there is no guarantee as to what fields are 
+	 * parsed.
+	 * 
+	 * @param date a date to parse
+	 * @return the years, months, day, hour, minute, second, and nanosecond
+	 * of the date. These properties correspond to indices 0, 1, 2, 3, 4, 5,
+	 * 6, respectively in the returned array
+	 */
+	protected static int[] parseFields( String date ) {
+	    String[] fields = date.split( "/|:| |\\." );
 	    int[] rtn = new int[ fields.length ];
 	    for ( int i=0 ; i<fields.length ; i++ ) {
 		rtn[ i ] = Integer.parseInt( fields[ i ] );
@@ -689,28 +784,41 @@ public class TimeScales {
 	    maintainRequiredPrecision( requiredPrecision );
 	    
 	    //handle special cases:
-	    if ( this.m_showDays && !this.m_showMonths ) {
-		this.m_showMonths = true;
+	    
+	    //days must be shown with months regardless of redundancies.
+	    //the label 09 is meaningless because it could be a day or a month;
+	    //however, the label 05/09 is unambiguous.
+	    if ( this.m_showDay && !this.m_showMonth ) {
+		this.m_showMonth = true;
 	    }
 	    
-	    if ( this.m_showMonths && !this.m_showDays && !this.m_showYears ) {
+	    //months must be shown with a day or a year, regardless of
+	    //redundancies. the label 10 is meaningless because it could be
+	    //a day or a month; however, the labsl 2014/10 and 10/19 are
+	    //unambiguous.
+	    if ( this.m_showMonth && !this.m_showDay && !this.m_showYear ) {
 		if ( requiredPrecision >= DAY_PRECISION ) {
-		    this.m_showDays = true;
+		    this.m_showDay = true;
 		}
 		else {
-		    this.m_showYears = true;
+		    this.m_showYear = true;
 		}
 	    }
 	    
-	    if ( this.m_showHours && !this.m_showMinutes ) {
-		this.m_showMinutes = true;
+	    //hours must be shown with minutes, regardless of redundancies
+	    //the label 12 is meaningless because it could be a day, month,
+	    //minute, second, etc; however, the label 12:12 is less ambiguous
+	    //as it could only be hour:minutes or minutes:seconds. hopefully
+	    //hour:minutes can then be inferred from the other labels.
+	    if ( this.m_showHour && !this.m_showMinute ) {
+		this.m_showMinute = true;
 	    }
 	    return buildDateString();
 	}
 	
 	/**
 	 * Removes redundant precision from a given date string; however, hours,
-	 * minutes, seconds, and nanoseconds must not be removed for redundance
+	 * minutes, seconds, and nanoseconds must not be removed for redundancy
 	 * because that gives rise to ambiguous times such as 9:15. The time
 	 * 9:15 could then be 9 hours 15 minutes or 9 minutes 15 seconds
 	 * and we resolve this by defining these ambiguous times to be the
@@ -720,94 +828,121 @@ public class TimeScales {
 	 */
 	void removeRedundantPrecision( int redundantPrecision ) {
 	    if ( redundantPrecision >= YEAR_PRECISION ) {
-		this.m_showYears = false;
+		this.m_showYear = false;
 		
 		if ( redundantPrecision >= MONTH_PRECISION ) { 
-		    this.m_showMonths = false;
+		    this.m_showMonth = false;
 		    
 		    if ( redundantPrecision >= DAY_PRECISION ) {
-			this.m_showDays = false;
+			this.m_showDay = false;
 		    }
 		}
 	    }
 	}
 	
+	/**
+	 * Ensures that the specified precision is maintained when
+	 * creating a final, trimmed string
+	 * 
+	 * @param requiredPrecision the most precise precision this trimmer 
+	 * must maintain
+	 */
 	void maintainRequiredPrecision( int requiredPrecision ) {
-	    
-	    //check if the nanoseconds need to be displayed
-	    if ( (this.m_nanosecond == 0) && requiredPrecision < NANOSECOND_PRECISION ) {
-		this.m_showNanoseconds = false;
-		
-		//check if the milliseconds need to be displayed
-		if ( (this.m_millisecond == 0) && requiredPrecision < MILLISECOND_PRECISION ) {
-		    this.m_showMilliseconds = false;
-		    
-		    if ( (this.m_second == 0) && requiredPrecision < SECOND_PRECISION ) {
-			this.m_showSeconds = false;
-			
-			if ( (this.m_minute == 0) && requiredPrecision < MINUTE_PRECISION ) {
-			    this.m_showMinutes = false;
-			    
-			    if ( (this.m_hour == 0) && requiredPrecision < HOUR_PRECISION ) {
-				this.m_showHours = false;
-				
-				if ( (this.m_day == 1) && requiredPrecision < DAY_PRECISION ) {
-				    this.m_showDays = false;
 
-				    if ( (this.m_month == 1) && requiredPrecision < MONTH_PRECISION ) {
-					this.m_showMonths = false;
-				    }
+	    if ( (this.m_nanosecond == 0) && requiredPrecision < NANOSECOND_PRECISIONS[1] ) {
+		this.m_showNanosecond = false;
+		    
+		if ( (this.m_second == 0) && requiredPrecision < SECOND_PRECISION ) {
+		    this.m_showSecond = false;
+
+		    if ( (this.m_minute == 0) && requiredPrecision < MINUTE_PRECISION ) {
+			this.m_showMinute = false;
+
+			if ( (this.m_hour == 0) && requiredPrecision < HOUR_PRECISION ) {
+			    this.m_showHour = false;
+
+			    if ( (this.m_day == 1) && requiredPrecision < DAY_PRECISION ) {
+				this.m_showDay = false;
+
+				if ( (this.m_month == 1) && requiredPrecision < MONTH_PRECISION ) {
+				    this.m_showMonth = false;
 				}
 			    }
 			}
 		    }
 		}
 	    }
+
+	    else {
+		
+		//if we must display at a nanoseconds detail level,
+		//then we must determine the number of decimal places to display
+		if ( requiredPrecision >= NANOSECOND_PRECISIONS[ 1 ] ) {
+		    //determine the number of demical places to which we display
+		    //nanoseconds
+		    for ( int i=1 ; i<NANOSECOND_PRECISIONS.length ; i++ ) {
+			if ( requiredPrecision == NANOSECOND_PRECISIONS[ i ] ) {
+			    this.m_nanosecondDecimalPlace = i;
+			}
+		    }
+		}
+		
+		//if nanoseconds need to be displayed just because they are
+		//nonzero, then we can just remove trailing zeroes
+		else if ( this.m_nanosecond != 0 ) {
+		    String withoutTrailingZeroes = removeTrailingZeroes( createNumericalString( this.m_nanosecond , 9 ) );
+		    this.m_nanosecondDecimalPlace = withoutTrailingZeroes.length();
+		}
+	    }
 	}
 	
+	/**
+	 * Creates the label for the date stored in this <code>DateTrimmer</code>
+	 * given the status of the year, month, day, etc. indicators.
+	 * 
+	 * @return 
+	 */
 	private String buildDateString() {
 	    String rtn = "";
-	    if ( this.m_showYears ) {
+	    if ( this.m_showYear ) {
 		rtn += createNumericalString( this.m_year , 4 );
-		if ( this.m_showMonths ) {
+		if ( this.m_showMonth ) {
 		    rtn += "/";
 		}
 	    }
-	    if ( this.m_showMonths ) {
+	    if ( this.m_showMonth ) {
 		rtn += createNumericalString( this.m_month , 2 );
-		if ( this.m_showDays ) {
+		if ( this.m_showDay ) {
 		    rtn += "/";
 		}
 	    }
-	    if ( this.m_showDays ) {
+	    if ( this.m_showDay ) {
 		rtn += createNumericalString( this.m_day , 2 );
-		if ( this.m_showHours ) {
+		if ( this.m_showHour ) {
 		    rtn += " ";
 		}
 	    }
-	    if ( this.m_showHours ) {
+	    if ( this.m_showHour ) {
 		rtn += createNumericalString( this.m_hour , 2 );
-		if ( this.m_showMinutes ) {
+		if ( this.m_showMinute ) {
 		    rtn += ":";
 		}
 	    }
-	    if ( this.m_showMinutes ) {
+	    if ( this.m_showMinute ) {
 		rtn += createNumericalString( this.m_minute , 2 );
-		if ( this.m_showSeconds ) {
+		if ( this.m_showSecond ) {
 		    rtn += ":";
 		}
 	    }
-	    if ( this.m_showSeconds ) {
+	    if ( this.m_showSecond ) {
 		rtn += createNumericalString( this.m_second , 2 );
-		if ( this.m_showMilliseconds ) {
+		if ( this.m_showNanosecond ) {
 		    rtn += ".";
 		}
 	    }
-	    if ( this.m_showMilliseconds ) {
-		rtn += createNumericalString( this.m_millisecond , 3 );
-	    }
-	    if ( this.m_showNanoseconds ) {
-		rtn += createNumericalString( this.m_nanosecond , 6 );
+
+	    if ( this.m_showNanosecond ) {
+		rtn += createNumericalString( this.m_nanosecond , 9 ).substring( 0 , this.m_nanosecondDecimalPlace );
 	    }
 	    return rtn;
 	}
@@ -828,18 +963,6 @@ public class TimeScales {
 	    }
 	    return rtn.substring( 0 , lastIdxOfNonzero+1 );
 	}
-    }
-    
-    static String toDateString( int year , int month , int day , int hour , int minute , int second , int millisecond , int nanosecond ) {
-	String yearText = createNumericalString( year , 4 );
-	String monthText = createNumericalString( month , 2 );
-	String dayText = createNumericalString( day , 2 );
-	String hourText = createNumericalString( hour , 2 );
-	String minuteText = createNumericalString( minute , 2 );
-	String secondText = createNumericalString( second , 2 );
-	String millisecondText = createNumericalString( millisecond , 3 );
-	String nanosecondText = createNumericalString( nanosecond , 6 );
-	return yearText + "/" + monthText + "/" + dayText + " " + hourText + ":" + minuteText + ":" + secondText + "." + millisecondText + nanosecondText;
     }
     
     /**

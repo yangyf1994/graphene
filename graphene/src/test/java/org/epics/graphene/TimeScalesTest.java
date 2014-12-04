@@ -19,7 +19,7 @@ import static org.epics.graphene.TimeScales.TimePeriod;
 import static java.util.GregorianCalendar.*;
 import java.util.TimeZone;
 import org.junit.Ignore;
-import org.epics.graphene.TimeScales.DateFormatter;
+import org.epics.graphene.TimeScales.DateTrimmer;
 
 /**
  *
@@ -1044,7 +1044,6 @@ public class TimeScalesTest {
     }
     
     @Test
-    @Ignore //To pass this test case will require more levels of precision
     public void trimLabelsNanoseconds2() {
 	//Test when the nanoseconds are changing with trailing 0s
 	List< String > input = Arrays.asList( 
@@ -1064,7 +1063,7 @@ public class TimeScalesTest {
 	List< String > found = TimeScales.trimLabels( input );
 	assertThat( found , equalTo( expected ) );
     }
-    
+       
     @Test
     public void trimLabelsMilliseconds1() {
 	//Test when the milliseconds are changing
@@ -1102,6 +1101,27 @@ public class TimeScalesTest {
 		"09:03:00.004" ,
 		"09:04:00.006" ,
 		"09:05:00.008" 
+	);
+	List< String > found = TimeScales.trimLabels( input );
+	assertThat( found , equalTo( expected ) );
+    }
+    
+    @Test
+    public void trimLabelsMilliseconds3() {
+	//Test when the nanoseconds are changing with trailing 0s
+	List< String > input = Arrays.asList( 
+		"2014/11/26 09:01:00.000000000" , 
+		"2014/11/26 09:02:00.020000000" ,
+		"2014/11/26 09:03:00.040000000" ,
+		"2014/11/26 09:04:00.060000000" ,
+		"2014/11/26 09:05:00.080000000" 
+	);
+	List< String > expected = Arrays.asList(
+		"2014/11/26 09:01:00.00" ,
+		"09:02:00.02" ,
+		"09:03:00.04" ,
+		"09:04:00.06" ,
+		"09:05:00.08" 
 	);
 	List< String > found = TimeScales.trimLabels( input );
 	assertThat( found , equalTo( expected ) );

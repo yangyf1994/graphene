@@ -608,12 +608,21 @@ public class TimeScales {
 	final public static int NANOSECOND_PRECISION = 7;
 	
 	private int m_year;
+	private boolean m_showYears = true;
 	private int m_month;
+	private boolean m_showMonths = true;
 	private int m_day;
+	private boolean m_showDays = true;
 	private int m_hour;
+	private boolean m_showHours = true;
 	private int m_minute;
+	private boolean m_showMinutes = true;
 	private int m_second;
+	private boolean m_showSeconds = true;
+	private int m_millisecond;
+	private boolean m_showMilliseconds = true;
 	private int m_nanosecond;
+	private boolean m_showNanoseconds = true;
 	
 	public DateFormatter( int year , int month , int day , int hour , int minute , int second , int nanosecond ) {
 	    this.m_year = year;
@@ -622,6 +631,18 @@ public class TimeScales {
 	    this.m_hour = hour;
 	    this.m_minute = minute;
 	    this.m_second = second;
+	    this.m_millisecond = nanosecond / 1000000;
+	    this.m_nanosecond = nanosecond % 1000000;
+	}
+	
+	public DateFormatter( int year , int month , int day , int hour , int minute , int second , int millisecond , int nanosecond ) {
+	    this.m_year = year;
+	    this.m_month = month;
+	    this.m_day = day;
+	    this.m_hour = hour;
+	    this.m_minute = minute;
+	    this.m_second = second;
+	    this.m_millisecond = millisecond;
 	    this.m_nanosecond = nanosecond;
 	}
 	
@@ -633,7 +654,8 @@ public class TimeScales {
 	    this.m_hour = fields[ 3 ];
 	    this.m_minute = fields[ 4 ];
 	    this.m_second = fields[ 5 ];
-	    this.m_nanosecond = fields[ 6 ];
+	    this.m_millisecond = fields[ 6 ] / 1000000;
+	    this.m_nanosecond = fields[ 6 ] % 1000000;
 	}
 	
 	protected static int[] parseFields( String time ) {
@@ -663,9 +685,27 @@ public class TimeScales {
 	    if ( commonPrecision >= requiredPrecision ) {
 		return "";
 	    }
-	    String rtn = maintainRequiredPrecision( commonPrecision , requiredPrecision );
-	    rtn = removeRedundantPrecision( rtn , commonPrecision , requiredPrecision );
-	    return rtn;
+	    removeRedundantPrecision( commonPrecision );
+	    maintainRequiredPrecision( requiredPrecision );
+	    
+	    //handle special cases:
+	    if ( this.m_showDays && !this.m_showMonths ) {
+		this.m_showMonths = true;
+	    }
+	    
+	    if ( this.m_showMonths && !this.m_showDays && !this.m_showYears ) {
+		if ( requiredPrecision >= DAY_PRECISION ) {
+		    this.m_showDays = true;
+		}
+		else {
+		    this.m_showYears = true;
+		}
+	    }
+	    
+	    if ( this.m_showHours && !this.m_showMinutes ) {
+		this.m_showMinutes = true;
+	    }
+	    return buildDateString();
 	}
 	
 	/**
@@ -676,128 +716,46 @@ public class TimeScales {
 	 * and we resolve this by defining these ambiguous times to be the
 	 * least precise possible.
 	 * 
-	 * @param dateStr the date string that needs redundant parts removed
 	 * @param redundantPrecision the precision to which the date is redundant
-	 * @return the date with as much redundance removed as possible.
 	 */
-	String removeRedundantPrecision( String dateStr , int redundantPrecision , int requiredPrecision ) {
-	    String rtn = dateStr;
+	void removeRedundantPrecision( int redundantPrecision ) {
 	    if ( redundantPrecision >= YEAR_PRECISION ) {
+		this.m_showYears = false;
 		
-		//if years are common, we cannot remove them unless both the months
-		//and days will be displayed. for example, we cannot have 06 (June)
-		//as a label. It needs to be like 2014/06 or 06/15 to make sense.
-		
-		//if the days and months have to remain, we can trim the year
-		if ( (redundantPrecision == YEAR_PRECISION && requiredPrecision >= DAY_PRECISION) ||
-		    
-		     //if the month and days have to remain, we can also trim the year
-		     //note that the months and days also have to remain if any of
-	             //hours, minutes, seconds, or nanoseconds have to remain
-		     (requiredPrecision == MONTH_PRECISION && 
-			(this.m_day != 1 || this.m_hour != 0 || this.m_minute != 0 || 
-			this.m_second != 0 || this.m_nanosecond != 0))) {
-		    rtn = rtn.substring( 5 , rtn.length() );
-		}
-		
-		if ( redundantPrecision >= MONTH_PRECISION ) {
-		    
-		    //we can remove years now since we know we have at least
-		    //months being displayed
-		    rtn = rtn.substring( 5 , rtn.length() );
-		    
-		    //if months are common, we cannot remove them unless
-		    //the days are also common. If we removed months but not days,
-		    //then we'd get ambiguous dates like 05 9:00:00.000000000
-		    //where it is unclear what "05" means, although we intended
-		    //it to be the day of the month
+		if ( redundantPrecision >= MONTH_PRECISION ) { 
+		    this.m_showMonths = false;
 		    
 		    if ( redundantPrecision >= DAY_PRECISION ) {
-			
-			//remove years, month and days
-			rtn = rtn.substring( 6 , rtn.length() );
-			
-			if ( redundantPrecision >= HOUR_PRECISION ) {
-			    
-			    //there is no more trimming we can do. otherwise,
-			    //this would create ambiguity. For example, would
-			    //09:15 be hours:minutes or minutes:seconds?
-			    //we can only resolve this by not allowing trimming
-			    //of hours, minutes, seconds, and nanoseconds
-			}
+			this.m_showDays = false;
 		    }
 		}
 	    }
-	    return rtn;
 	}
 	
-	String maintainRequiredPrecision( int redundantPrecision , int requiredPrecision ) {
-	    String rtn = toDateString( this.m_year , this.m_month , this.m_day , 
-	      this.m_hour , this.m_minute , this.m_second , this.m_nanosecond );
+	void maintainRequiredPrecision( int requiredPrecision ) {
 	    
-	    //check if the nanoseconds need to be displayed (we only consider
-	    //nanosecond values smaller than the millisecond)
-	    //every millisecond is 10^6 nanoseconds, so by modding out 10^6,
-	    //we exclude the milliseconds from our consideration
-	    if ( (this.m_nanosecond % 1000000 == 0) && requiredPrecision < NANOSECOND_PRECISION ) {
-		
-		//if nanoseconds are 0, then there's no need to display them
-		rtn = rtn.substring( 0 , rtn.length() - 6 );
+	    //check if the nanoseconds need to be displayed
+	    if ( (this.m_nanosecond == 0) && requiredPrecision < NANOSECOND_PRECISION ) {
+		this.m_showNanoseconds = false;
 		
 		//check if the milliseconds need to be displayed
-		if ( (this.m_nanosecond == 0) && requiredPrecision < MILLISECOND_PRECISION ) {
-		    
-		    //we subtract 4 because we need to remove the "." that comes
-		    //before the milliseconds
-		    rtn = rtn.substring( 0 , rtn.length() - 4 );
+		if ( (this.m_millisecond == 0) && requiredPrecision < MILLISECOND_PRECISION ) {
+		    this.m_showMilliseconds = false;
 		    
 		    if ( (this.m_second == 0) && requiredPrecision < SECOND_PRECISION ) {
-			
-			//we subtract 3 because we need to remove the ":" that comes
-			//before the seconds
-			rtn = rtn.substring( 0 , rtn.length() - 3 );
+			this.m_showSeconds = false;
 			
 			if ( (this.m_minute == 0) && requiredPrecision < MINUTE_PRECISION ) {
-			    
-			    //we do not remove the minutes because hours without
-			    //minutes are ambiguous. For example, consider the date
-			    //   2014/05/25 09. It should instead be rewritten as
-			    //   2014/05/25 09:00
+			    this.m_showMinutes = false;
 			    
 			    if ( (this.m_hour == 0) && requiredPrecision < HOUR_PRECISION ) {
-				
-				//we subtract 3 because there is an extra space between the day of month
-				//and hour in the representation of the date
-				rtn = rtn.substring( 0 , rtn.length()-6 );
+				this.m_showHours = false;
 				
 				if ( (this.m_day == 1) && requiredPrecision < DAY_PRECISION ) {
-				    
-				    //we can only delete the day if the months
-				    //will also be deleted, or if the year will not be deleted
-				    //for example, we cannot have 06 floating
-				    //around on its own as June. We need the date
-				    //like 06/15 or 2014/06 for the month to make sense
-				    if ( (this.m_month == 1 ) && requiredPrecision < MONTH_PRECISION ) {
-					rtn = rtn.substring( 0 , rtn.length()-3 );
-				    }
-				    
-				    //Note: These conditions are simply the negation of
-				    //the conditions that would cause the year to be deleted
-				    //in the removeRedunantPrecision() method
-				    else if ( redundantPrecision < YEAR_PRECISION ||
-					 (redundantPrecision != YEAR_PRECISION || requiredPrecision >= MONTH_PRECISION) ||
-					 (requiredPrecision != MONTH_PRECISION || (this.m_month == 1 && 
-					    this.m_day == 1 && this.m_hour == 0 && this.m_minute == 0 && 
-					    this.m_second == 0 && this.m_nanosecond==0) ) ) {
-					//we subtract 3 because there is an extra "/" between the
-					//day and the month
-					rtn = rtn.substring( 0 , rtn.length()-3 );
-				    }
-				    
-				    //we subtract 3 because there is an extra "/" between
-				    //the month and the year
+				    this.m_showDays = false;
+
 				    if ( (this.m_month == 1) && requiredPrecision < MONTH_PRECISION ) {
-					rtn = rtn.substring( 0 , rtn.length()-3 );
+					this.m_showMonths = false;
 				    }
 				}
 			    }
@@ -805,18 +763,51 @@ public class TimeScales {
 		    }
 		}
 	    }
-	    else if ( this.m_nanosecond != 0 ) {
-		
-		//reaching this block means that nanoseconds value is not 0, but
-		//the required precision is less than nanoseconds
-		//use nanoseconds without their trailing zeroes
-		rtn = rtn.substring( 0 , rtn.length()-6 ) + removeTrailingZeroes( createNumericalString( this.m_nanosecond%1000000  , 6 ) );
+	}
+	
+	private String buildDateString() {
+	    String rtn = "";
+	    if ( this.m_showYears ) {
+		rtn += createNumericalString( this.m_year , 4 );
+		if ( this.m_showMonths ) {
+		    rtn += "/";
+		}
 	    }
-	    else { 
-		
-		//reaching this block means that nanoseconds value must be 0 and the
-		//required precision is nanoseconds. thus, we
-		//do not trim anything because we need all 9 digits of nanosecond precision
+	    if ( this.m_showMonths ) {
+		rtn += createNumericalString( this.m_month , 2 );
+		if ( this.m_showDays ) {
+		    rtn += "/";
+		}
+	    }
+	    if ( this.m_showDays ) {
+		rtn += createNumericalString( this.m_day , 2 );
+		if ( this.m_showHours ) {
+		    rtn += " ";
+		}
+	    }
+	    if ( this.m_showHours ) {
+		rtn += createNumericalString( this.m_hour , 2 );
+		if ( this.m_showMinutes ) {
+		    rtn += ":";
+		}
+	    }
+	    if ( this.m_showMinutes ) {
+		rtn += createNumericalString( this.m_minute , 2 );
+		if ( this.m_showSeconds ) {
+		    rtn += ":";
+		}
+	    }
+	    if ( this.m_showSeconds ) {
+		rtn += createNumericalString( this.m_second , 2 );
+		if ( this.m_showMilliseconds ) {
+		    rtn += ".";
+		}
+	    }
+	    if ( this.m_showMilliseconds ) {
+		rtn += createNumericalString( this.m_millisecond , 3 );
+	    }
+	    if ( this.m_showNanoseconds ) {
+		rtn += createNumericalString( this.m_nanosecond , 6 );
 	    }
 	    return rtn;
 	}
@@ -839,15 +830,16 @@ public class TimeScales {
 	}
     }
     
-    static String toDateString( int year , int month , int day , int hour , int minute , int second , int nanosecond ) {
+    static String toDateString( int year , int month , int day , int hour , int minute , int second , int millisecond , int nanosecond ) {
 	String yearText = createNumericalString( year , 4 );
 	String monthText = createNumericalString( month , 2 );
 	String dayText = createNumericalString( day , 2 );
 	String hourText = createNumericalString( hour , 2 );
 	String minuteText = createNumericalString( minute , 2 );
 	String secondText = createNumericalString( second , 2 );
-	String nanosecondText = createNumericalString( nanosecond , 9 );
-	return yearText + "/" + monthText + "/" + dayText + " " + hourText + ":" + minuteText + ":" + secondText + "." + nanosecondText;
+	String millisecondText = createNumericalString( millisecond , 3 );
+	String nanosecondText = createNumericalString( nanosecond , 6 );
+	return yearText + "/" + monthText + "/" + dayText + " " + hourText + ":" + minuteText + ":" + secondText + "." + millisecondText + nanosecondText;
     }
     
     /**
